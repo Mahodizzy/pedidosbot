@@ -8,7 +8,7 @@ admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const GRUPO_REFS = process.env.GRUPO_REFERENCIAS_ID;
-const LOGO_URL = process.env.LOGO_URL; // Tu logo configurado en Render
+const LOGO_URL = process.env.LOGO_URL; 
 
 bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
@@ -32,77 +32,87 @@ bot.on('callback_query', async (ctx) => {
         }
 
         else if (accion === 'ref') {
+            console.log("Iniciando proceso de referencia para:", orderId);
             await ctx.answerCbQuery("Generando referencia... ⏳");
             
             const doc = await orderRef.get();
             if (!doc.exists) return ctx.answerCbQuery("Error: Pedido no encontrado");
             const pedido = doc.data();
 
-            // 1. Obtener imagen del comprobante y el Logo
-            const fileId = ctx.callbackQuery.message.photo[ctx.callbackQuery.message.photo.length - 1].file_id;
+            // 1. Obtener imagen del comprobante
+            const photo = ctx.callbackQuery.message.photo;
+            const fileId = photo[photo.length - 1].file_id;
             const fileLink = await ctx.telegram.getFileLink(fileId);
             
-            const [image, logo] = await Promise.all([
-                Jimp.read(fileLink.href),
-                Jimp.read(LOGO_URL).catch(() => null) // Si no hay logo, sigue sin error
-            ]);
-
+            console.log("Descargando imagen...");
+            const image = await Jimp.read(fileLink.href);
             const w = image.bitmap.width;
             const h = image.bitmap.height;
 
-            // --- 2. CENSURAR NOMBRE DEL CLIENTE ---
-            // En Pichincha y Guayaquil, los nombres están en el centro (y=0.48 a 0.62)
-            // Creamos un rectángulo de censura elegante (Gris oscuro/Negro)
-            const censuraColor = 0x111111FF; // Negro mate
-            const inicioCensuraY = h * 0.47;
-            const altoCensura = h * 0.16;
+            // --- 2. CENSURAR NOMBRE DEL CLIENTE (MÉTODO SEGURO) ---
+            console.log("Aplicando censura...");
+            const altoCensura = Math.floor(h * 0.16);
+            const inicioCensuraY = Math.floor(h * 0.47);
 
-            image.scan(0, inicioCensuraY, w, altoCensura, function(x, y, idx) {
-                this.bitmap.data[idx] = 20;     // R
-                this.bitmap.data[idx + 1] = 20; // G
-                this.bitmap.data[idx + 2] = 20; // B
-                this.bitmap.data[idx + 3] = 255; // Alpha
-            });
+            // Creamos una caja negra del tamaño de la censura
+            const box = new Jimp(w, altoCensura, '#1a1a1a'); 
+            
+            // Ponemos la caja negra sobre la imagen original
+            image.composite(box, 0, inicioCensuraY);
 
-            // Texto sobre la censura
-            const font = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-            image.print(font, 50, inicioCensuraY + (altoCensura / 3), "DATOS PROTEGIDOS POR PRIVACIDAD");
+            // Intentar poner texto sobre la censura
+            try {
+                const font = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
+                image.print(font, 50, inicioCensuraY + (altoCensura / 4), "DATOS PROTEGIDOS - REFILLS EC");
+            } catch (e) { console.log("No se pudo cargar la fuente, saltando texto."); }
 
             // --- 3. AÑADIR MARCA DE AGUA (LOGO) ---
-            if (logo) {
-                // Cambiar tamaño del logo (que ocupe el 25% del ancho de la imagen)
-                logo.resize(w * 0.3, Jimp.AUTO);
-                // Ponerlo en la esquina inferior derecha con opacidad
-                image.composite(logo, w - logo.bitmap.width - 20, h - logo.bitmap.height - 20, {
-                    mode: Jimp.BLEND_SOURCE_OVER,
-                    opacitySource: 0.6
-                });
+            if (LOGO_URL) {
+                console.log("Cargando logo desde:", LOGO_URL);
+                try {
+                    const logo = await Jimp.read(LOGO_URL);
+                    logo.resize(Math.floor(w * 0.35), Jimp.AUTO); // Logo al 35% del ancho
+                    
+                    // Posición: Esquina inferior derecha
+                    const posX = w - logo.bitmap.width - 30;
+                    const posY = h - logo.bitmap.height - 30;
+
+                    image.composite(logo, posX, posY, {
+                        mode: Jimp.BLEND_SOURCE_OVER,
+                        opacitySource: 0.5 // 50% de transparencia
+                    });
+                    console.log("Logo aplicado correctamente.");
+                } catch (logoError) {
+                    console.log("Error al cargar el logo, se enviará sin marca de agua:", logoError.message);
+                }
             }
 
+            // 4. Convertir a Buffer y enviar
+            console.log("Generando buffer final...");
             const buffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            // --- 4. ENVÍO AL GRUPO ---
             const productos = pedido.items.map(i => `${i.quantity}x ${i.name}`).join(', ');
             const primerNombre = pedido.cliente.split(' ')[0];
             
-            const mensajeRef = `✅ *NUEVA REFERENCIA EXITOSA*\n\n🆔 *Pedido:* ${pedido.id}\n👤 *Cliente:* ${primerNombre} ***\n🛒 *Compra:* ${productos}\n\n🙏 ¡Gracias por elegir Refills EC!`;
+            const mensajeRef = `✅ *NUEVA REFERENCIA EXITOSA*\n\n🆔 *Pedido:* ${pedido.id}\n👤 *Cliente:* ${primerNombre} ***\n🛒 *Compra:* ${productos}\n\n🙏 ¡Gracias por confiar en Refills EC!`;
 
+            console.log("Enviando foto al grupo...");
             await ctx.telegram.sendPhoto(GRUPO_REFS, { source: buffer }, {
                 caption: mensajeRef,
                 parse_mode: 'Markdown'
             });
 
-            await ctx.answerCbQuery("📢 ¡Publicado en Referencias!");
-            
-            await ctx.editMessageCaption(`✅ *PEDIDO ENTREGADO*\nID: ${orderId}\n\n📢 _Referencia publicada (Censurada)_`, { 
+            await ctx.editMessageCaption(`✅ *PEDIDO ENTREGADO*\nID: ${orderId}\n\n📢 _Referencia publicada con éxito._`, { 
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [] } 
             });
+
+            console.log("Proceso completado con éxito.");
         }
     } catch (error) {
-        console.error("Error:", error);
-        ctx.answerCbQuery("Error al procesar");
+        console.error("ERROR CRÍTICO:", error);
+        ctx.answerCbQuery("Hubo un error al procesar la imagen.");
     }
 });
 
-bot.launch().then(() => console.log("Bot iniciado con Marca de Agua"));
+bot.launch().then(() => console.log("Bot iniciado con correcciones de Jimp"));
