@@ -2,7 +2,6 @@ const { Telegraf } = require('telegraf');
 const admin = require('firebase-admin');
 
 // 1. CONFIGURACIÓN DE FIREBASE
-// Usaremos variables de entorno para no subir nuestras llaves a GitHub
 const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
 
 admin.initializeApp({
@@ -16,16 +15,19 @@ const GRUPO_REFS = process.env.GRUPO_REFERENCIAS_ID;
 // 2. LÓGICA DE LOS BOTONES
 bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
+    console.log("Botón presionado:", callbackData); // Esto aparecerá en los logs de Render
+
     const [accion, orderId] = callbackData.split('_');
     const orderRef = db.collection('orders').doc(orderId);
 
     try {
         // --- CASO: ACEPTAR PEDIDO ---
         if (accion === 'accept') {
+            console.log("Aceptando pedido:", orderId);
             await orderRef.update({ status: 'entregado' });
+            
             await ctx.answerCbQuery("✅ Pedido Aceptado");
 
-            // Editamos el mensaje: Cambiamos texto y ponemos el botón de referencias
             await ctx.editMessageCaption(`✅ *PEDIDO ENTREGADO*\nID: ${orderId}\n\nEl cliente ya puede verlo en su historial. Ahora puedes publicarlo:`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
@@ -37,15 +39,18 @@ bot.on('callback_query', async (ctx) => {
         }
 
         // --- CASO: RECHAZAR PEDIDO ---
-        if (accion === 'reject') {
+        else if (accion === 'reject') {
+            console.log("Rechazando pedido:", orderId);
             await orderRef.update({ status: 'rechazado' });
             await ctx.answerCbQuery("❌ Pedido Rechazado");
-            // Quitamos los botones al rechazar
-            await ctx.editMessageCaption(`❌ *PEDIDO RECHAZADO*\nID: ${orderId}`, { reply_markup: { inline_keyboard: [] } });
+            await ctx.editMessageCaption(`❌ *PEDIDO RECHAZADO*\nID: ${orderId}`, { 
+                reply_markup: { inline_keyboard: [] } 
+            });
         }
 
         // --- CASO: ENVIAR A REFERENCIAS ---
-        if (accion === 'ref') {
+        else if (accion === 'ref') {
+            console.log("Enviando a referencias:", orderId);
             const doc = await orderRef.get();
             if (!doc.exists) return ctx.answerCbQuery("Error: Pedido no encontrado");
             
@@ -54,7 +59,6 @@ bot.on('callback_query', async (ctx) => {
 
             const mensajeRef = `✅ *REFERENCIA EXITOSA*\n\n🆔 *Pedido:* ${pedido.id}\n👤 *Cliente:* ${pedido.cliente}\n🛒 *Compra:* ${productos}\n\n🙏 Gracias por su confianza.`;
 
-            // Enviar al grupo de referencias
             await ctx.telegram.sendPhoto(GRUPO_REFS, ctx.callbackQuery.message.photo[0].file_id, {
                 caption: mensajeRef,
                 parse_mode: 'Markdown'
@@ -62,7 +66,6 @@ bot.on('callback_query', async (ctx) => {
 
             await ctx.answerCbQuery("📢 Publicado con éxito");
             
-            // Editamos el mensaje final para quitar el botón ya usado
             await ctx.editMessageCaption(`✅ *PEDIDO ENTREGADO*\nID: ${orderId}\n\n📢 _Publicado en Referencias_`, { 
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [] } 
@@ -70,6 +73,14 @@ bot.on('callback_query', async (ctx) => {
         }
     } catch (error) {
         console.error("Error procesando botón:", error);
-        ctx.answerCbQuery("Hubo un error");
+        ctx.answerCbQuery("Hubo un error técnico");
     }
 });
+
+// ESTA LÍNEA ES VITAL:
+console.log("Iniciando Bot...");
+bot.launch().then(() => console.log("Bot en línea y escuchando."));
+
+// Manejo de cierre seguro
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
