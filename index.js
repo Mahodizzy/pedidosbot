@@ -1,3 +1,19 @@
+const { Telegraf } = require('telegraf');
+const admin = require('firebase-admin');
+
+// 1. CONFIGURACIÓN DE FIREBASE
+// Usaremos variables de entorno para no subir nuestras llaves a GitHub
+const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+const db = admin.firestore();
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const GRUPO_REFS = process.env.GRUPO_REFERENCIAS_ID;
+
+// 2. LÓGICA DE LOS BOTONES
 bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     const [accion, orderId] = callbackData.split('_');
