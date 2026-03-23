@@ -3,7 +3,7 @@ const admin = require('firebase-admin');
 const Jimp = require('jimp');
 const express = require('express');
 
-// --- SERVIDOR DE VIDA ---
+// --- SERVIDOR DE VIDA (Para Render) ---
 const app = express();
 app.get('/', (req, res) => res.send('Bot Online ✅'));
 const PORT = process.env.PORT || 3000;
@@ -22,7 +22,7 @@ bot.on('callback_query', async (ctx) => {
     const [accion, orderId] = callbackData.split('_');
     const orderRef = db.collection('orders').doc(orderId);
     
-    // CAPTURAMOS EL TEXTO ORIGINAL DEL MENSAJE
+    // CAPTURAMOS EL TEXTO ORIGINAL DEL MENSAJE (Para no perder info)
     const originalCaption = ctx.callbackQuery.message.caption || "";
 
     try {
@@ -31,7 +31,6 @@ bot.on('callback_query', async (ctx) => {
             await orderRef.update({ status: 'entregado' });
             await ctx.answerCbQuery("✅ Pedido Aceptado");
 
-            // Mantenemos el texto original y añadimos el estado debajo
             const nuevoTexto = `${originalCaption}\n\n✅ <b>ESTADO: ENTREGADO</b>\nEl cliente ya puede verlo en su historial.`;
 
             await ctx.editMessageCaption(nuevoTexto, {
@@ -57,7 +56,7 @@ bot.on('callback_query', async (ctx) => {
 
         // --- CASO: ENVIAR A REFERENCIAS ---
         else if (accion === 'ref') {
-            await ctx.answerCbQuery("Generando referencia... ⏳");
+            await ctx.answerCbQuery("Generando referencia con marca de agua... ⏳");
             
             const doc = await orderRef.get();
             if (!doc.exists) return ctx.answerCbQuery("Error: Pedido no encontrado");
@@ -71,48 +70,39 @@ bot.on('callback_query', async (ctx) => {
             const w = Math.round(image.bitmap.width);
             const h = Math.round(image.bitmap.height);
 
-            // --- CENSURA Y LOGO ---
             // --- CENSURA ESTÉTICA ---
             console.log("Aplicando censura ajustada...");
-            
-            // 1. Definimos dimensiones más pequeñas
-            const anchoCensura = Math.round(w * 0.85); // 85% del ancho total (no llega a los bordes)
-            const altoCensura = Math.round(h * 0.07);  // 7% de la altura (franja más delgada)
-            const inicioCensuraY = Math.round(h * 0.52); // Ajustado para centrar mejor en el nombre
-            const centroX = Math.round((w - anchoCensura) / 2); // Calculamos el centro horizontal
+            const anchoCensura = Math.round(w * 0.85); 
+            const altoCensura = Math.round(h * 0.07);  
+            const inicioCensuraY = Math.round(h * 0.52); 
+            const centroX = Math.round((w - anchoCensura) / 2); 
 
-            // 2. Creamos la franja negra
             const box = new Jimp(anchoCensura, altoCensura, '#000000'); 
-            
-            // 3. La ponemos sobre la imagen centrada
             image.composite(box, centroX, inicioCensuraY);
 
-            // 4. AÑADIMOS EL TEXTO SOBRE LA FRANJA
+            // TEXTO SOBRE LA FRANJA
             try {
-                // Usamos una fuente un poco más pequeña (16 o 32) para que quepa bien
                 const font = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE); 
-                
-                // Centramos el texto dentro de la franja negra
                 image.print(font, 0, inicioCensuraY, {
                     text: 'Verificado por Refills Ec',
                     alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
                     alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
                 }, w, altoCensura);
-                
-            } catch (e) { 
-                console.log("Error al poner el texto: ", e.message); 
-            }
+            } catch (e) { console.log("Error texto censura: ", e.message); }
 
-            // --- LOGO / MARCA DE AGUA (Se mantiene igual pero verificado) ---
+            // --- LOGO / MARCA DE AGUA ---
             if (LOGO_URL) {
                 try {
                     const logo = await Jimp.read(LOGO_URL);
-                    logo.resize(Math.round(w * 0.30), Jimp.AUTO); // Logo un poco más pequeño (30%)
+                    logo.resize(Math.round(w * 0.30), Jimp.AUTO); 
                     const posX = Math.round(w - logo.bitmap.width - 30);
                     const posY = Math.round(h - logo.bitmap.height - 30);
                     image.composite(logo, posX, posY, { mode: Jimp.BLEND_SOURCE_OVER, opacitySource: 0.5 });
                 } catch (err) { console.log("Error logo:", err.message); }
             }
+
+            // --- GENERAR EL BUFFER (IMPORTANTE) ---
+            const buffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
             // --- ENVÍO AL GRUPO ---
             const productos = pedido.items.map(i => `• ${i.quantity}x ${i.name}`).join('\n');
@@ -131,8 +121,7 @@ bot.on('callback_query', async (ctx) => {
 
             await ctx.answerCbQuery("📢 ¡Publicado!");
             
-            // ACTUALIZAMOS EL MENSAJE DEL ADMIN SIN BORRAR NADA
-            // Quitamos el botón de referencias y añadimos la nota de publicado
+            // ACTUALIZAR MENSAJE DEL ADMIN (Añadimos nota de publicado)
             const textoFinalAdmin = `${originalCaption}\n\n✅ <b>ESTADO: ENTREGADO</b>\n📢 <i>Publicado en Referencias</i>`;
 
             await ctx.editMessageCaption(textoFinalAdmin, { 
@@ -146,4 +135,8 @@ bot.on('callback_query', async (ctx) => {
     }
 });
 
-bot.launch().then(() => console.log("Bot corregido: No borra info"));
+bot.launch().then(() => console.log("Bot 24/7 en línea - Refills EC"));
+
+// Cierre seguro
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
