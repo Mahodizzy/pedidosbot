@@ -21,13 +21,20 @@ bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     const [accion, orderId] = callbackData.split('_');
     const orderRef = db.collection('orders').doc(orderId);
+    
+    // CAPTURAMOS EL TEXTO ORIGINAL DEL MENSAJE
+    const originalCaption = ctx.callbackQuery.message.caption || "";
 
     try {
+        // --- CASO: ACEPTAR PEDIDO ---
         if (accion === 'accept') {
             await orderRef.update({ status: 'entregado' });
             await ctx.answerCbQuery("✅ Pedido Aceptado");
-            // Usamos HTML aquí también
-            await ctx.editMessageCaption(`✅ <b>PEDIDO ENTREGADO</b>\nID: ${orderId}\n\nEl cliente ya puede verlo en su historial. Ahora puedes publicarlo:`, {
+
+            // Mantenemos el texto original y añadimos el estado debajo
+            const nuevoTexto = `${originalCaption}\n\n✅ <b>ESTADO: ENTREGADO</b>\nEl cliente ya puede verlo en su historial.`;
+
+            await ctx.editMessageCaption(nuevoTexto, {
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[{ text: "📢 Enviar a Referencias", callback_data: `ref_${orderId}` }]]
@@ -35,17 +42,21 @@ bot.on('callback_query', async (ctx) => {
             });
         }
 
+        // --- CASO: RECHAZAR PEDIDO ---
         else if (accion === 'reject') {
             await orderRef.update({ status: 'rechazado' });
             await ctx.answerCbQuery("❌ Pedido Rechazado");
-            await ctx.editMessageCaption(`❌ <b>PEDIDO RECHAZADO</b>\nID: ${orderId}`, { 
+
+            const nuevoTextoRechazo = `${originalCaption}\n\n❌ <b>ESTADO: RECHAZADO</b>`;
+
+            await ctx.editMessageCaption(nuevoTextoRechazo, { 
                 parse_mode: 'HTML',
                 reply_markup: { inline_keyboard: [] } 
             });
         }
 
+        // --- CASO: ENVIAR A REFERENCIAS ---
         else if (accion === 'ref') {
-            console.log("--- Iniciando proceso de imagen ---");
             await ctx.answerCbQuery("Generando referencia... ⏳");
             
             const doc = await orderRef.get();
@@ -60,29 +71,25 @@ bot.on('callback_query', async (ctx) => {
             const w = Math.round(image.bitmap.width);
             const h = Math.round(image.bitmap.height);
 
-            // --- CENSURA ---
+            // --- CENSURA Y LOGO ---
             const altoCensura = Math.round(h * 0.16);
             const inicioCensuraY = Math.round(h * 0.47);
             const box = new Jimp(w, altoCensura, '#1a1a1a'); 
             image.composite(box, 0, inicioCensuraY);
 
-            // --- LOGO / MARCA DE AGUA ---
             if (LOGO_URL) {
                 try {
                     const logo = await Jimp.read(LOGO_URL);
                     logo.resize(Math.round(w * 0.35), Jimp.AUTO);
                     const posX = Math.round(w - logo.bitmap.width - 30);
                     const posY = Math.round(h - logo.bitmap.height - 30);
-                    image.composite(logo, posX, posY, {
-                        mode: Jimp.BLEND_SOURCE_OVER,
-                        opacitySource: 0.5 
-                    });
+                    image.composite(logo, posX, posY, { mode: Jimp.BLEND_SOURCE_OVER, opacitySource: 0.5 });
                 } catch (err) { console.log("Error logo:", err.message); }
             }
 
             const buffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            // --- MENSAJE EN HTML (Más seguro que Markdown) ---
+            // --- ENVÍO AL GRUPO ---
             const productos = pedido.items.map(i => `• ${i.quantity}x ${i.name}`).join('\n');
             const primerNombre = pedido.cliente.split(' ')[0];
             
@@ -94,19 +101,24 @@ bot.on('callback_query', async (ctx) => {
 
             await ctx.telegram.sendPhoto(GRUPO_REFS, { source: buffer }, {
                 caption: mensajeRef,
-                parse_mode: 'HTML' // Cambiado a HTML
+                parse_mode: 'HTML'
             });
 
-            await ctx.editMessageCaption(`✅ <b>PEDIDO ENTREGADO</b>\nID: ${orderId}\n\n📢 <i>Referencia publicada con éxito.</i>`, { 
+            await ctx.answerCbQuery("📢 ¡Publicado!");
+            
+            // ACTUALIZAMOS EL MENSAJE DEL ADMIN SIN BORRAR NADA
+            // Quitamos el botón de referencias y añadimos la nota de publicado
+            const textoFinalAdmin = `${originalCaption}\n\n✅ <b>ESTADO: ENTREGADO</b>\n📢 <i>Publicado en Referencias</i>`;
+
+            await ctx.editMessageCaption(textoFinalAdmin, { 
                 parse_mode: 'HTML',
                 reply_markup: { inline_keyboard: [] } 
             });
-            console.log("¡Enviado con éxito!");
         }
     } catch (error) {
         console.error("ERROR:", error);
-        ctx.answerCbQuery("Error al enviar la referencia.");
+        ctx.answerCbQuery("Error en el proceso.");
     }
 });
 
-bot.launch().then(() => console.log("Bot listo con HTML"));
+bot.launch().then(() => console.log("Bot corregido: No borra info"));
