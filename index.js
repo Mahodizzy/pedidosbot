@@ -72,22 +72,47 @@ bot.on('callback_query', async (ctx) => {
             const h = Math.round(image.bitmap.height);
 
             // --- CENSURA Y LOGO ---
-            const altoCensura = Math.round(h * 0.16);
-            const inicioCensuraY = Math.round(h * 0.47);
-            const box = new Jimp(w, altoCensura, '#1a1a1a'); 
-            image.composite(box, 0, inicioCensuraY);
+            // --- CENSURA ESTÉTICA ---
+            console.log("Aplicando censura ajustada...");
+            
+            // 1. Definimos dimensiones más pequeñas
+            const anchoCensura = Math.round(w * 0.85); // 85% del ancho total (no llega a los bordes)
+            const altoCensura = Math.round(h * 0.07);  // 7% de la altura (franja más delgada)
+            const inicioCensuraY = Math.round(h * 0.52); // Ajustado para centrar mejor en el nombre
+            const centroX = Math.round((w - anchoCensura) / 2); // Calculamos el centro horizontal
 
+            // 2. Creamos la franja negra
+            const box = new Jimp(anchoCensura, altoCensura, '#000000'); 
+            
+            // 3. La ponemos sobre la imagen centrada
+            image.composite(box, centroX, inicioCensuraY);
+
+            // 4. AÑADIMOS EL TEXTO SOBRE LA FRANJA
+            try {
+                // Usamos una fuente un poco más pequeña (16 o 32) para que quepa bien
+                const font = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE); 
+                
+                // Centramos el texto dentro de la franja negra
+                image.print(font, 0, inicioCensuraY, {
+                    text: 'Verificado por Refills Ec',
+                    alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+                    alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
+                }, w, altoCensura);
+                
+            } catch (e) { 
+                console.log("Error al poner el texto: ", e.message); 
+            }
+
+            // --- LOGO / MARCA DE AGUA (Se mantiene igual pero verificado) ---
             if (LOGO_URL) {
                 try {
                     const logo = await Jimp.read(LOGO_URL);
-                    logo.resize(Math.round(w * 0.35), Jimp.AUTO);
+                    logo.resize(Math.round(w * 0.30), Jimp.AUTO); // Logo un poco más pequeño (30%)
                     const posX = Math.round(w - logo.bitmap.width - 30);
                     const posY = Math.round(h - logo.bitmap.height - 30);
                     image.composite(logo, posX, posY, { mode: Jimp.BLEND_SOURCE_OVER, opacitySource: 0.5 });
                 } catch (err) { console.log("Error logo:", err.message); }
             }
-
-            const buffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
             // --- ENVÍO AL GRUPO ---
             const productos = pedido.items.map(i => `• ${i.quantity}x ${i.name}`).join('\n');
