@@ -82,9 +82,9 @@ bot.on('callback_query', async (ctx) => {
 
             // TEXTO SOBRE LA FRANJA
             try {
-                const font = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE); 
+                const font = await Jimp.loadFont(Jimp.FONT_SANS_18_WHITE); 
                 image.print(font, 0, inicioCensuraY, {
-                    text: 'Verificado por Refills Ec',
+                    text: 'Verificado por Refills Ec✅',
                     alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
                     alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
                 }, w, altoCensura);
